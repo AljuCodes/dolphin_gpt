@@ -7,6 +7,7 @@ import ChatInput from "./components/ChatInput";
 import { Message, MemoryFact, streamChat, getMemory } from "./lib/api";
 
 export default function Home() {
+  const maxClientMessages = 12;
   const [messages, setMessages] = useState<Message[]>([]);
   const [facts, setFacts] = useState<MemoryFact[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -35,21 +36,41 @@ export default function Home() {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
-    const newMessages: Message[] = [...messages, { role: "user", content }];
-    setMessages([...newMessages, { role: "assistant", content: "" }]);
+    const userMessage: Message = { role: "user", content };
+    const assistantMessage: Message = { role: "assistant", content: "" };
+    const newMessages: Message[] = [...messages, userMessage].slice(
+      -maxClientMessages
+    );
+    setMessages([...newMessages, assistantMessage]);
     setStreaming(true);
 
     try {
-      for await (const chunk of streamChat(newMessages, abortRef.current.signal)) {
+      let pending = "";
+      let lastFlush = performance.now();
+
+      const flush = () => {
+        if (!pending) return;
+        const text = pending;
+        pending = "";
         setMessages((prev) => {
           const next = [...prev];
           next[next.length - 1] = {
             ...next[next.length - 1],
-            content: next[next.length - 1].content + chunk,
+            content: next[next.length - 1].content + text,
           };
           return next;
         });
+      };
+
+      for await (const chunk of streamChat(newMessages, abortRef.current.signal)) {
+        pending += chunk;
+        const now = performance.now();
+        if (now - lastFlush >= 40) {
+          flush();
+          lastFlush = now;
+        }
       }
+      flush();
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         setMessages((prev) => {

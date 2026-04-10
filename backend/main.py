@@ -2,8 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
+import asyncio
 
 from routers import chat, memory as memory_router
+from services.ollama_client import prewarm_model
 
 load_dotenv()
 
@@ -19,6 +21,19 @@ app.add_middleware(
 
 app.include_router(chat.router, prefix="/api")
 app.include_router(memory_router.router, prefix="/api")
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    if os.getenv("OLLAMA_PREWARM", "1") == "1":
+        asyncio.create_task(_safe_prewarm())
+
+
+async def _safe_prewarm() -> None:
+    try:
+        await prewarm_model()
+    except Exception:
+        pass
 
 
 @app.get("/")

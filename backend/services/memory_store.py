@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 _FILE = Path(__file__).parent.parent / "data" / "memory.json"
+_NAME_PREFIX = "__profile_name__:"
 
 
 def _load() -> list[dict]:
@@ -42,9 +43,40 @@ def clear() -> None:
     _save([])
 
 
-def as_prompt_context() -> str:
-    facts = _load()
+def set_user_name(name: str) -> None:
+    data = _load()
+    data = [m for m in data if not str(m.get("fact", "")).startswith(_NAME_PREFIX)]
+    data.append({"id": str(uuid.uuid4()), "fact": f"{_NAME_PREFIX}{name.strip()}"})
+    _save(data)
+
+
+def get_user_name() -> str | None:
+    data = _load()
+    for item in reversed(data):
+        fact = str(item.get("fact", ""))
+        if fact.startswith(_NAME_PREFIX):
+            name = fact[len(_NAME_PREFIX):].strip()
+            return name or None
+    return None
+
+
+def all_user_facts() -> list[dict]:
+    """Return all non-profile facts, suitable for semantic search."""
+    return [
+        m for m in _load()
+        if not str(m.get("fact", "")).startswith(_NAME_PREFIX)
+    ]
+
+
+def as_prompt_context(max_items: int = 12, max_chars: int = 900) -> str:
+    facts = [
+        m
+        for m in _load()
+        if not str(m.get("fact", "")).startswith(_NAME_PREFIX)
+    ][-max_items:]
     if not facts:
         return ""
     lines = "\n".join(f"- {m['fact']}" for m in facts)
+    if len(lines) > max_chars:
+        lines = lines[-max_chars:]
     return f"## Remembered context:\n{lines}\n\n"
