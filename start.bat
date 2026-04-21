@@ -23,6 +23,39 @@ if errorlevel 1 (
   exit /b 1
 )
 
+set "MODEL=hf.co/TrevorJS/gemma-4-E4B-it-uncensored-GGUF:Q4_K_M"
+if exist "backend\.env" (
+  for /f "usebackq tokens=1,* delims==" %%A in ("backend\.env") do (
+    if /i "%%A"=="OLLAMA_MODEL" set "MODEL=%%B"
+  )
+)
+
+curl -s http://localhost:11434/api/tags | findstr /C:"\"%MODEL%\"" >nul
+if errorlevel 1 (
+  echo.
+  echo AI model "%MODEL%" is not downloaded yet.
+  echo Downloading now ^(about 3 GB, one time^). You can cancel with Ctrl+C.
+  echo.
+  where ollama >nul 2>&1
+  if errorlevel 1 (
+    echo Could not find the 'ollama' command.
+    echo Please run this manually, then restart the launcher:
+    echo     ollama pull %MODEL%
+    pause
+    exit /b 1
+  )
+  ollama pull "%MODEL%"
+  if errorlevel 1 (
+    echo.
+    echo Model download failed. Check your internet connection and try again.
+    pause
+    exit /b 1
+  )
+  echo.
+  echo Model ready.
+  echo.
+)
+
 echo Starting backend on http://localhost:8000
 start "dolphin_gpt backend" cmd /k "cd backend && venv\Scripts\activate && uvicorn main:app --host 127.0.0.1 --port 8000"
 

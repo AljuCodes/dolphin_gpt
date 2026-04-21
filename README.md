@@ -32,22 +32,14 @@ Download the **LTS** version from **https://nodejs.org**. Run the installer with
 
 Open a terminal (on Mac: the **Terminal** app; on Windows: **Command Prompt** or **PowerShell**). Copy and paste each block one at a time.
 
-### Step 1 — Download the AI model (about 3 GB, one-time)
-
-```bash
-ollama pull hf.co/TrevorJS/gemma-4-E4B-it-uncensored-GGUF:Q4_K_M
-```
-
-The download takes a few minutes on a typical connection. If it gets interrupted, just run the command again — it resumes where it left off.
-
-### Step 2 — Download this app
+### Step 1 — Download this app
 
 ```bash
 git clone https://github.com/AljuCodes/dolphin_gpt.git
 cd dolphin_gpt
 ```
 
-### Step 3 — Install the backend
+### Step 2 — Install the backend
 
 **Mac / Linux:**
 
@@ -69,7 +61,7 @@ pip install -r requirements.txt
 cd ..
 ```
 
-### Step 4 — Install the frontend
+### Step 3 — Install the frontend
 
 ```bash
 cd frontend
@@ -77,7 +69,7 @@ npm install
 cd ..
 ```
 
-That's it. Setup is done.
+That's it. Setup is done. The first time you launch the app, it will download the AI model (about 3 GB) automatically — you'll see a progress bar.
 
 ## Running the app
 
