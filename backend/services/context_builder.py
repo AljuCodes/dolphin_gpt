@@ -17,7 +17,7 @@ from typing import Any
 import numpy as np
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.getenv("OLLAMA_MODEL", "dolphin-mistral:latest")
+MODEL = os.getenv("OLLAMA_MODEL", "hf.co/TrevorJS/gemma-4-E4B-it-uncensored-GGUF:Q4_K_M")
 
 _embedder: Any = None
 _llm: Any = None

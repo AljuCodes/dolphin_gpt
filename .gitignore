@@ -11,3 +11,7 @@ frontend/.env.local
 
 # OS
 .DS_Store
+
+# Local user data (chat history, memories) — never commit
+backend/data/*.json
+

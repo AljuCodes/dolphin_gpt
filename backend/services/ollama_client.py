@@ -5,7 +5,7 @@ from typing import AsyncGenerator
 import httpx
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.getenv("OLLAMA_MODEL", "dolphin-mistral:latest")
+MODEL = os.getenv("OLLAMA_MODEL", "hf.co/TrevorJS/gemma-4-E4B-it-uncensored-GGUF:Q4_K_M")
 OLLAMA_OPTIONS = {
     "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "4096")),
     "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.6")),
@@ -21,6 +21,7 @@ async def stream_chat(
     options_override: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     options = OLLAMA_OPTIONS if not options_override else {**OLLAMA_OPTIONS, **options_override}
+    print(f"[ollama] options sent: {options}", flush=True)
     async with httpx.AsyncClient(timeout=None) as client:
         async with client.stream(
             "POST",
@@ -42,6 +43,12 @@ async def stream_chat(
                 if chunk:
                     yield chunk
                 if data.get("done"):
+                    print(
+                        f"[ollama] done_reason={data.get('done_reason')} "
+                        f"eval_count={data.get('eval_count')} "
+                        f"prompt_eval_count={data.get('prompt_eval_count')}",
+                        flush=True,
+                    )
                     return
 
 

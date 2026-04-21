@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "dolphin_gpt",
-  description: "Uncensored local AI chat powered by dolphin-mistral",
+  description: "Uncensored local AI chat powered by gemma",
 };
 
 export default function RootLayout({

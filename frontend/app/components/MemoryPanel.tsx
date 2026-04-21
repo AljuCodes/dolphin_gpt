@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   MemoryFact,
   addMemoryFact,
@@ -11,10 +12,23 @@ import {
 interface Props {
   facts: MemoryFact[];
   onRefresh: () => void;
+  open: boolean;
+  onClose: () => void;
 }
 
-export default function MemoryPanel({ facts, onRefresh }: Props) {
+export default function MemoryPanel({ facts, onRefresh, open, onClose }: Props) {
   const [input, setInput] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   const handleAdd = async () => {
     if (!input.trim()) return;
@@ -33,13 +47,48 @@ export default function MemoryPanel({ facts, onRefresh }: Props) {
     onRefresh();
   };
 
-  return (
-    <aside className="flex flex-col w-72 min-w-[18rem] bg-zinc-800 border-r border-zinc-700 h-screen p-4 gap-3">
+  if (!open) return null;
+
+  const content = (
+    <>
+      {isMobile && (
+        <div
+          onClick={onClose}
+          className="fixed inset-0 bg-black/60"
+          style={{ zIndex: 2147483646, pointerEvents: "auto" }}
+          aria-hidden
+        />
+      )}
+      <aside
+        className="bg-zinc-800 border-r border-zinc-700 p-4 flex flex-col gap-3"
+        style={
+          isMobile
+            ? {
+                position: "fixed",
+                top: 0,
+                bottom: 0,
+                left: 0,
+                width: "18rem",
+                zIndex: 2147483647,
+                pointerEvents: "auto",
+              }
+            : { width: "18rem", minWidth: "18rem", height: "100vh" }
+        }
+      >
       <div className="flex items-center gap-2">
         <span className="text-base">🧠</span>
         <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
           Memory
         </h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="ml-auto inline-flex items-center gap-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded-md px-3 py-1.5 text-xs font-medium md:hidden"
+          aria-label="Close memory panel"
+          style={{ touchAction: "manipulation" }}
+        >
+          ✕ Close
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto flex flex-col gap-2">
@@ -91,6 +140,11 @@ export default function MemoryPanel({ facts, onRefresh }: Props) {
           Clear all memories
         </button>
       )}
-    </aside>
+      </aside>
+    </>
   );
+
+  if (!mounted) return null;
+  if (isMobile) return createPortal(content, document.body);
+  return content;
 }

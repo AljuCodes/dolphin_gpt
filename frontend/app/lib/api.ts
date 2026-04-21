@@ -1,17 +1,31 @@
 export type Message = { role: "user" | "assistant"; content: string };
 export type MemoryFact = { id: string; fact: string };
+export type ChatSummary = {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  message_count: number;
+};
+export type ChatFull = ChatSummary & { messages: Message[] };
 
-const base = () =>
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const base = () => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+  return "http://localhost:8000";
+};
 
 export async function* streamChat(
   messages: Message[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  opts?: { webSearch?: boolean }
 ): AsyncGenerator<string, void, unknown> {
   const res = await fetch(`${base()}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, web_search: opts?.webSearch ?? false }),
     signal,
   });
 
@@ -58,3 +72,29 @@ export const addMemoryFact = (fact: string) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fact }),
   }).then<MemoryFact>((r) => r.json());
+
+export const listChats = () =>
+  fetch(`${base()}/api/chats`).then<ChatSummary[]>((r) => r.json());
+
+export const getChat = (id: string) =>
+  fetch(`${base()}/api/chats/${id}`).then<ChatFull>((r) => r.json());
+
+export const createChat = (messages: Message[] = [], title?: string) =>
+  fetch(`${base()}/api/chats`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, title }),
+  }).then<ChatFull>((r) => r.json());
+
+export const updateChat = (
+  id: string,
+  patch: { messages?: Message[]; title?: string }
+) =>
+  fetch(`${base()}/api/chats/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  }).then<ChatFull>((r) => r.json());
+
+export const deleteChat = (id: string) =>
+  fetch(`${base()}/api/chats/${id}`, { method: "DELETE" });
