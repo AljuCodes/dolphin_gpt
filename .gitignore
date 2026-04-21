@@ -15,3 +15,6 @@ frontend/.env.local
 # Local user data (chat history, memories) — never commit
 backend/data/*.json
 
+# Unrelated local files
+kaggle_comfyui_animatediff.ipynb
+
