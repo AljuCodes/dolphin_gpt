@@ -87,6 +87,8 @@ Double-click **`start.bat`**.
 
 Either way, your browser should open **http://localhost:3000** after a few seconds. If it doesn't open on its own, go there manually.
 
+**First launch only:** the launcher notices the AI model isn't on your machine and downloads it for you (about 3 GB). You'll see a progress bar in the launcher window. This only happens once — future launches start in seconds. If the download is interrupted, just run the launcher again; it resumes where it left off.
+
 **To stop the app:** close the terminal window (Mac/Linux) or close both command windows (Windows).
 
 ## Everyday use
@@ -111,7 +113,10 @@ The search uses DuckDuckGo, which occasionally rate-limits. Wait a minute and tr
 The speed depends on your computer's RAM and CPU. The model needs about 4 GB of free RAM. If you have 8 GB total, close other apps while using this.
 
 **I want to use a different model**
-Any model from https://ollama.com/library will work. After `ollama pull <model-name>`, create a file called `.env` inside the `backend` folder and put: `OLLAMA_MODEL=<model-name>`. Then restart the app.
+Any model from https://ollama.com/library will work. Create a file called `.env` inside the `backend` folder and put: `OLLAMA_MODEL=<model-name>`. Next time you launch, the app will download it automatically if it isn't already present.
+
+**The model download failed or got stuck**
+Cancel with Ctrl+C and run the launcher again — Ollama resumes partial downloads. If it keeps failing, check your internet connection or free up disk space (models need several GB).
 
 ## Your data
 
