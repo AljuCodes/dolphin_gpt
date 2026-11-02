@@ -30,6 +30,27 @@ _SYSTEM = (
 class ChatRequest(BaseModel):
     messages: list[dict]
     web_search: bool = False
+    agent_mode: bool = False
+
+
+_AGENT_SYSTEM = (
+    "\n\n## Command execution (agent mode)\n"
+    "You can run real shell commands on the user's own machine. When you want to "
+    "execute a command, reply with a fenced code block tagged `run` containing "
+    "exactly ONE command, then STOP and wait — do not predict or invent the output. "
+    "Example:\n"
+    "```run\n"
+    "ls -la ~/Downloads\n"
+    "```\n"
+    "The command will run and you will receive its real stdout, stderr, and exit "
+    "code as the next message. Then continue: run another `run` block if you need "
+    "to, or give your final answer in plain text. "
+    "Rules: use `run` ONLY for commands you actually want executed; use a plain "
+    "`bash` block for examples you are only showing. Chain steps with one command "
+    "per turn so each result guides the next. Each command runs in a fresh shell, "
+    "so combine directory changes inline (e.g. `cd /path && ls`). Prefer safe, "
+    "reversible commands and explain briefly what a command does before running it."
+)
 
 
 _NAME_PATTERNS = [
@@ -85,7 +106,11 @@ def _word_count(text: str) -> int:
     return len([w for w in re.split(r"\s+", text.strip()) if w])
 
 
-async def _sse_stream(messages: list[dict], web_search_enabled: bool = False):
+async def _sse_stream(
+    messages: list[dict],
+    web_search_enabled: bool = False,
+    agent_mode: bool = False,
+):
     keep_last = int(os.getenv("CHAT_MAX_MESSAGES", "12"))
     trimmed_messages = messages[-keep_last:]
     old_messages = messages[:-keep_last] if len(messages) > keep_last else []
@@ -132,6 +157,8 @@ async def _sse_stream(messages: list[dict], web_search_enabled: bool = False):
     )
 
     system_content = _SYSTEM
+    if agent_mode:
+        system_content += _AGENT_SYSTEM
     if summary:
         system_content = (
             f"## Earlier conversation summary:\n{summary}\n\n" + system_content
@@ -236,7 +263,11 @@ async def _extract_memories(messages: list[dict], reply: str) -> None:
 @router.post("/chat")
 async def chat(req: ChatRequest):
     return StreamingResponse(
-        _sse_stream(req.messages, web_search_enabled=req.web_search),
+        _sse_stream(
+            req.messages,
+            web_search_enabled=req.web_search,
+            agent_mode=req.agent_mode,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

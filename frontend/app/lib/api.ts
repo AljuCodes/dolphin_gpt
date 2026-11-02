@@ -1,4 +1,19 @@
-export type Message = { role: "user" | "assistant"; content: string };
+export type Message = {
+  role: "user" | "assistant";
+  content: string;
+  // Client-only marker: a "tool" message holds shell-command output that was
+  // fed back to the model. Stripped before sending to the backend.
+  kind?: "tool";
+};
+
+export type ExecResult = {
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+  timed_out: boolean;
+  truncated: boolean;
+  duration_ms: number;
+};
 export type MemoryFact = { id: string; fact: string };
 export type ChatSummary = {
   id: string;
@@ -20,12 +35,18 @@ const base = () => {
 export async function* streamChat(
   messages: Message[],
   signal?: AbortSignal,
-  opts?: { webSearch?: boolean }
+  opts?: { webSearch?: boolean; agentMode?: boolean }
 ): AsyncGenerator<string, void, unknown> {
+  // Send only role + content to the model; drop client-only markers like `kind`.
+  const wire = messages.map((m) => ({ role: m.role, content: m.content }));
   const res = await fetch(`${base()}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, web_search: opts?.webSearch ?? false }),
+    body: JSON.stringify({
+      messages: wire,
+      web_search: opts?.webSearch ?? false,
+      agent_mode: opts?.agentMode ?? false,
+    }),
     signal,
   });
 
@@ -56,6 +77,25 @@ export async function* streamChat(
     reader.releaseLock();
   }
 }
+
+export const execCommand = (command: string, signal?: AbortSignal) =>
+  fetch(`${base()}/api/exec`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command }),
+    signal,
+  }).then<ExecResult>((r) => {
+    if (!r.ok) throw new Error("exec failed");
+    return r.json();
+  });
+
+export const getExecStatus = () =>
+  fetch(`${base()}/api/exec/status`).then<{
+    enabled: boolean;
+    workdir: string;
+    timeout: number;
+    max_output: number;
+  }>((r) => r.json());
 
 export const getMemory = () =>
   fetch(`${base()}/api/memory`).then<MemoryFact[]>((r) => r.json());

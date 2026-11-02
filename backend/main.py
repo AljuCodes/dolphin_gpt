@@ -7,7 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import asyncio
 
-from routers import chat, memory as memory_router, chats as chats_router
+from routers import (
+    chat,
+    memory as memory_router,
+    chats as chats_router,
+    tools as tools_router,
+)
 from services.ollama_client import prewarm_model
 
 app = FastAPI(title="dolphin_gpt", version="1.0.0")
@@ -23,6 +28,7 @@ app.add_middleware(
 app.include_router(chat.router, prefix="/api")
 app.include_router(memory_router.router, prefix="/api")
 app.include_router(chats_router.router, prefix="/api")
+app.include_router(tools_router.router, prefix="/api")
 
 
 @app.on_event("startup")

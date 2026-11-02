@@ -18,3 +18,4 @@ backend/data/*.json
 # Unrelated local files
 kaggle_comfyui_animatediff.ipynb
 
+tools

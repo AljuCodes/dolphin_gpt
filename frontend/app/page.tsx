@@ -4,16 +4,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import MemoryPanel from "./components/MemoryPanel";
 import ChatListPanel from "./components/ChatListPanel";
 import MessageBubble from "./components/MessageBubble";
+import ToolMessage from "./components/ToolMessage";
 import ChatInput from "./components/ChatInput";
 import {
   Message,
   MemoryFact,
+  ExecResult,
   streamChat,
+  execCommand,
   getMemory,
   createChat,
   updateChat,
   getChat,
 } from "./lib/api";
+import {
+  extractRunCommand,
+  formatToolResult,
+  MAX_AGENT_STEPS,
+} from "./lib/agent";
 
 export default function Home() {
   const maxClientMessages = 12;
@@ -23,6 +31,23 @@ export default function Home() {
   const [showMemory, setShowMemory] = useState(true);
   const [showChats, setShowChats] = useState(false);
   const [webSearch, setWebSearch] = useState(false);
+  const [agentMode, setAgentMode] = useState(false);
+  const [autoRun, setAutoRun] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [pendingCommand, setPendingCommand] = useState<{ command: string } | null>(
+    null
+  );
+  const agentModeRef = useRef(false);
+  const autoRunRef = useRef(false);
+  const agentCancelledRef = useRef(false);
+  const execAbortRef = useRef<AbortController | null>(null);
+  const approvalResolverRef = useRef<((v: boolean) => void) | null>(null);
+  useEffect(() => {
+    agentModeRef.current = agentMode;
+  }, [agentMode]);
+  useEffect(() => {
+    autoRunRef.current = autoRun;
+  }, [autoRun]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [chatsRefreshKey, setChatsRefreshKey] = useState(0);
   const activeChatIdRef = useRef<string | null>(null);
@@ -37,6 +62,8 @@ export default function Home() {
   useEffect(() => {
     const stored = localStorage.getItem("webSearch");
     if (stored === "1") setWebSearch(true);
+    if (localStorage.getItem("agentMode") === "1") setAgentMode(true);
+    if (localStorage.getItem("autoRun") === "1") setAutoRun(true);
     if (window.matchMedia("(max-width: 767px)").matches) setShowMemory(false);
   }, []);
 
@@ -44,6 +71,35 @@ export default function Home() {
     setWebSearch((v) => {
       const next = !v;
       localStorage.setItem("webSearch", next ? "1" : "0");
+      return next;
+    });
+  };
+
+  const toggleAgentMode = () => {
+    setAgentMode((v) => {
+      const next = !v;
+      localStorage.setItem("agentMode", next ? "1" : "0");
+      if (!next) {
+        setAutoRun(false);
+        localStorage.setItem("autoRun", "0");
+      }
+      return next;
+    });
+  };
+
+  const toggleAutoRun = () => {
+    setAutoRun((v) => {
+      const next = !v;
+      if (
+        next &&
+        !window.confirm(
+          "Auto-run will execute every command the model proposes WITHOUT asking " +
+            "you first. A local model can generate destructive commands. Enable anyway?"
+        )
+      ) {
+        return v;
+      }
+      localStorage.setItem("autoRun", next ? "1" : "0");
       return next;
     });
   };
@@ -114,7 +170,7 @@ export default function Home() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   };
 
-  const runStream = async (baseMessages: Message[]) => {
+  const runStream = async (baseMessages: Message[]): Promise<string> => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
@@ -126,6 +182,7 @@ export default function Home() {
     setStreaming(true);
     setPinned(true);
 
+    let assembled = "";
     try {
       let pending = "";
       let lastFlush = performance.now();
@@ -147,8 +204,9 @@ export default function Home() {
       for await (const chunk of streamChat(
         baseMessages,
         abortRef.current.signal,
-        { webSearch }
+        { webSearch, agentMode: agentModeRef.current }
       )) {
+        assembled += chunk;
         pending += chunk;
         const now = performance.now();
         if (now - lastFlush >= 40) {
@@ -190,47 +248,142 @@ export default function Home() {
         /* persistence best-effort */
       }
     }
+    return assembled;
   };
 
+  // --- Agent mode: command approval + execution loop -----------------------
+
+  const requestApproval = (command: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      approvalResolverRef.current = resolve;
+      setPendingCommand({ command });
+    });
+
+  const resolveApproval = (approved: boolean) => {
+    setPendingCommand(null);
+    const resolve = approvalResolverRef.current;
+    approvalResolverRef.current = null;
+    resolve?.(approved);
+  };
+
+  const runCommand = async (command: string): Promise<ExecResult | null> => {
+    setExecuting(true);
+    execAbortRef.current = new AbortController();
+    try {
+      return await execCommand(command, execAbortRef.current.signal);
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return null;
+      return {
+        stdout: "",
+        stderr: "Could not reach the exec endpoint. Is the backend running?",
+        exit_code: -1,
+        timed_out: false,
+        truncated: false,
+        duration_ms: 0,
+      };
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  const runAgentTurn = async (initialBase: Message[]) => {
+    let convo = initialBase;
+    for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+      const finalText = await runStream(convo);
+      convo = [...convo, { role: "assistant", content: finalText }];
+      if (!agentModeRef.current || agentCancelledRef.current) return;
+
+      const command = extractRunCommand(finalText);
+      if (!command) return;
+
+      const approved = autoRunRef.current
+        ? true
+        : await requestApproval(command);
+      if (!approved || agentCancelledRef.current) return;
+
+      const result = await runCommand(command);
+      if (result === null || agentCancelledRef.current) return;
+
+      const toolMsg: Message = {
+        role: "user",
+        kind: "tool",
+        content: formatToolResult(command, result),
+      };
+      convo = [...convo, toolMsg].slice(-maxClientMessages);
+      setMessages(convo);
+    }
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `⚠ Reached the ${MAX_AGENT_STEPS}-command limit for this turn. Send another message to keep going.`,
+      },
+    ]);
+  };
+
+  const run = async (base: Message[]) => {
+    agentCancelledRef.current = false;
+    if (agentModeRef.current) {
+      await runAgentTurn(base);
+    } else {
+      await runStream(base);
+    }
+  };
+
+  const busy = streaming || executing || pendingCommand !== null;
+
   const sendMessage = async (content: string) => {
-    if (streaming) return;
+    if (busy) return;
     const userMsg: Message = { role: "user", content };
     const base: Message[] = [...messages, userMsg].slice(-maxClientMessages);
-    await runStream(base);
+    await run(base);
   };
 
   const stopGeneration = () => {
+    agentCancelledRef.current = true;
     abortRef.current?.abort();
+    execAbortRef.current?.abort();
+    resolveApproval(false);
     setStreaming(false);
+    setExecuting(false);
   };
 
   const regenerateLast = async () => {
-    if (streaming) return;
+    if (busy) return;
     // Drop the last assistant message (must be the most recent)
     const last = messages[messages.length - 1];
     if (!last || last.role !== "assistant") return;
     const base = messages.slice(0, -1);
     if (base.length === 0 || base[base.length - 1].role !== "user") return;
-    await runStream(base);
+    await run(base);
   };
 
   const editUserMessageAt = async (index: number, next: string) => {
-    if (streaming) return;
+    if (busy) return;
     const base: Message[] = messages.slice(0, index + 1);
     if (!base[index] || base[index].role !== "user") return;
     base[index] = { role: "user", content: next };
-    await runStream(base);
+    await run(base);
   };
 
   const clearChat = () => {
+    agentCancelledRef.current = true;
     abortRef.current?.abort();
+    execAbortRef.current?.abort();
+    resolveApproval(false);
     setMessages([]);
     setActiveChatId(null);
     setStreaming(false);
+    setExecuting(false);
   };
 
   const selectChat = async (id: string) => {
-    if (streaming) abortRef.current?.abort();
+    if (busy) {
+      agentCancelledRef.current = true;
+      abortRef.current?.abort();
+      execAbortRef.current?.abort();
+      resolveApproval(false);
+    }
     try {
       const full = await getChat(id);
       setMessages(full.messages);
@@ -303,6 +456,38 @@ export default function Home() {
               🌐 {webSearch ? "Web: on" : "Web: off"}
             </button>
             <button
+              onClick={toggleAgentMode}
+              title={
+                agentMode
+                  ? "Command execution is ON — the model can run shell commands (you approve each one)"
+                  : "Command execution is OFF — click to let the model run shell commands"
+              }
+              className={`text-xs rounded px-2 py-1 border transition-colors ${
+                agentMode
+                  ? "bg-emerald-600/20 border-emerald-500 text-emerald-200 hover:bg-emerald-600/30"
+                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              🖥 {agentMode ? "Run: on" : "Run: off"}
+            </button>
+            {agentMode && (
+              <button
+                onClick={toggleAutoRun}
+                title={
+                  autoRun
+                    ? "Auto-run is ON — commands execute without asking. Click to require approval."
+                    : "Auto-run is OFF — you approve each command. Click to run automatically."
+                }
+                className={`text-xs rounded px-2 py-1 border transition-colors ${
+                  autoRun
+                    ? "bg-amber-600/20 border-amber-500 text-amber-200 hover:bg-amber-600/30"
+                    : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                ⚡ {autoRun ? "Auto-run" : "Approve"}
+              </button>
+            )}
+            <button
               onClick={clearChat}
               className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
             >
@@ -332,6 +517,9 @@ export default function Home() {
             )}
 
             {messages.map((msg, i) => {
+              if (msg.kind === "tool") {
+                return <ToolMessage key={i} content={msg.content} />;
+              }
               const isLastAssistant =
                 msg.role === "assistant" && i === messages.length - 1;
               const isLastUser =
@@ -346,10 +534,10 @@ export default function Home() {
                   content={msg.content}
                   isStreaming={streaming && isLastAssistant}
                   onRegenerate={
-                    !streaming && isLastAssistant ? regenerateLast : undefined
+                    !busy && isLastAssistant ? regenerateLast : undefined
                   }
                   onEdit={
-                    !streaming && isLastUser
+                    !busy && isLastUser
                       ? (next) => editUserMessageAt(i, next)
                       : undefined
                   }
@@ -369,10 +557,56 @@ export default function Home() {
           </button>
         )}
 
+        {(pendingCommand || executing) && (
+          <div className="px-4 pb-2 md:pb-0">
+            <div className="max-w-4xl mx-auto">
+              {pendingCommand && (
+                <div className="rounded-xl border border-emerald-600/50 bg-zinc-800 p-3 mb-2">
+                  <div className="text-xs text-zinc-400 mb-1.5">
+                    The model wants to run this command:
+                  </div>
+                  <pre className="font-mono text-sm text-emerald-300 bg-zinc-950 rounded-lg px-3 py-2 overflow-x-auto whitespace-pre-wrap break-words">
+                    {pendingCommand.command}
+                  </pre>
+                  <div className="flex items-center gap-2 mt-2.5">
+                    <button
+                      onClick={() => resolveApproval(true)}
+                      className="text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-md px-3 py-1.5 transition-colors"
+                    >
+                      ▶ Run
+                    </button>
+                    <button
+                      onClick={() => resolveApproval(false)}
+                      className="text-xs text-zinc-300 hover:text-white bg-zinc-700 hover:bg-zinc-600 rounded-md px-3 py-1.5 transition-colors"
+                    >
+                      Skip
+                    </button>
+                    <span className="text-xs text-zinc-500 ml-auto">
+                      runs on your machine
+                    </span>
+                  </div>
+                </div>
+              )}
+              {executing && (
+                <div className="rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2 mb-2 flex items-center gap-2 text-xs text-zinc-300">
+                  <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  Running command…
+                  <button
+                    onClick={stopGeneration}
+                    className="ml-auto text-zinc-400 hover:text-white"
+                  >
+                    Stop
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <ChatInput
           onSend={sendMessage}
-          disabled={streaming}
-          streaming={streaming}
+          disabled={busy}
+          streaming={streaming || executing}
           onStop={stopGeneration}
         />
       </div>
